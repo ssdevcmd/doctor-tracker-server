@@ -1,199 +1,9 @@
-// const express = require('express');
-// const app = express();
-// const cors = require('cors');
-// const dotenv = require("dotenv");
-// const { MongoClient, ServerApiVersion } = require('mongodb');
-
-// dotenv.config();
-
-// const port = process.env.PORT || 5000;
-
-// // Middleware
-// app.use(cors());
-// app.use(express.json());
-
-// const uri = process.env.MONGODB_URI;
-
-// const client = new MongoClient(uri, {
-//   serverApi: {
-//     version: ServerApiVersion.v1,
-//     strict: true,
-//     deprecationErrors: true,
-//   }
-// });
-
-
-
-
-// const run = async () => {
-//   try {
-//     await client.connect();
-  
-
-//   await client.db("admin").command({ ping: 1 });
-//   console.log("Pinged your deployment. You successfully connected to MongoDB!");
-// } finally {
-//   //await client.close();
-// }
-// }
-// run().catch(console.dir);
-
-
-// const db = client.db('doctor_tracker_db');
-// const doctorsCollection = db.collection('doctors');
-
-
-// // DOCTOR APIs
-
-// // GET all doctors
-// // GET /api/doctors?page=1&limit=10&search=sarah&status=active
-
-// app.get("/api/doctors", async (req, res) => {
-//   try {
-//     const { page, limit, skip } = getPagination(req.query);
-//     const { search, status } = req.query;
-
-//     const filter = {
-//       ...getSearchFilter(search, [
-//         "name",
-//         "email",
-//         "specialization",
-//         "phone",
-//       ]),
-//     };
-
-//     if (status) filter.status = status;
-
-//     const [doctors, total] = await Promise.all([
-//       doctorsCollection
-//         .find(filter)
-//         .sort({ createdAt: -1 })
-//         .skip(skip)
-//         .limit(limit)
-//         .toArray(),
-
-//       doctorsCollection.countDocuments(filter),
-//     ]);
-
-//     res.json({
-//       items: doctors,
-//       total,
-//       currentPage: page,
-//       totalPages: Math.ceil(total / limit),
-//     });
-//   } catch (error) {
-//     sendServerError(res, error);
-//   }
-// });
-
-
-// // CREATE doctor
-// // POST /api/doctors
-// app.post("/api/doctors", async (req, res) => {
-//     const {
-//       name,
-//       email,
-//       phone,
-//       specialization,
-//       qualification,
-//       experience,
-//       consultationFee,
-//       address,
-//     } = req.body;
-
-//     if (!name || !email || !phone || !specialization) {
-//       return res.status(400).json({
-//         message: "Name, email, phone and specialization are required.",
-//       });
-//     }
-
-//     const normalizedEmail = email.trim().toLowerCase();
-
-//     const existingDoctor = await doctorsCollection.findOne({
-//       email: normalizedEmail,
-//     });
-
-//     if (existingDoctor) {
-//       return res.status(409).json({
-//         message: "A doctor with this email already exists.",
-//       });
-//     }
-
-//     const newDoctor = {
-//       name: name.trim(),
-//       email: normalizedEmail,
-//       phone: phone.trim(),
-//       specialization: specialization.trim(),
-//       qualification: qualification || "",
-//       experience: Number(experience) || 0,
-//       consultationFee: Number(consultationFee) || 0,
-//       address: address || "",
-//       status: "active",
-//       createdAt: new Date(),
-//       updatedAt: new Date(),
-//     };
-
-//     const result = await doctorsCollection.insertOne(newDoctor);
-
-//     res.status(201).json({
-//       message: "Doctor created successfully.",
-//       doctor: {
-//         ...newDoctor,
-//         _id: result.insertedId,
-//       },
-//     });
-//   });
-
-//   // GET doctor details with patients
-// // GET /api/doctors/:id
-
-// app.get("/api/doctors/:id", async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     if (!isValidId(id)) {
-//       return res.status(400).json({ message: "Invalid doctor ID." });
-//     }
-
-//     const doctor = await doctorsCollection.findOne({
-//       _id: new ObjectId(id),
-//     });
-
-//     if (!doctor) {
-//       return res.status(404).json({ message: "Doctor not found." });
-//     }
-
-//     const patients = await patientsCollection
-//       .find({ doctorId: doctor._id })
-//       .sort({ createdAt: -1 })
-//       .toArray();
-
-//     res.json({
-//       doctor,
-//       patients,
-//     });
-//   } catch (error) {
-//     sendServerError(res, error);
-//   }
-// });
-
-
-
-
-// app.get('/', (req, res) => {
-//   res.send('Database connection is successful!');
-// });
-
-// app.listen(port, () => {
-//   console.log(`Server is running on port ${port}`);
-// });
-
-
 const express = require('express');
 const app = express();
 const cors = require('cors');
 const dotenv = require("dotenv");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 dotenv.config();
 
@@ -202,6 +12,12 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.send("Doctor Tracker API is running");
+});
+
+
 
 const uri = process.env.MONGODB_URI;
 
@@ -212,6 +28,48 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+
+const AUTH_URL = process.env.BETTER_AUTH_URL;
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${AUTH_URL}/api/auth/jwks`)
+);
+
+// Verify JWT middleware
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    // Check Authorization header
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        message: "Unauthorized. Token is required.",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    // Verify JWT
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: AUTH_URL,
+      audience: AUTH_URL,
+    });
+
+    // Store user information
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    console.error("JWT verification error:", error.message);
+
+    return res.status(401).json({
+      message: "Invalid or expired token.",
+    });
+  }
+};
+
+// Protect all API routes
+app.use("/api", verifyToken);
 
 // Helper Functions
 const getPagination = (query) => {
@@ -909,9 +767,6 @@ app.use((error, req, res, next) => {
 });
 
 
-app.get('/', (req, res) => {
-  res.send('Database connection is successful!');
-});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
