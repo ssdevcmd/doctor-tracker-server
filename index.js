@@ -354,6 +354,159 @@ app.post("/api/doctors", async (req, res) => {
   }
 });
 
+// GET doctor details with patients
+app.get("/api/doctors/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid doctor ID." });
+    }
+
+    const doctor = await doctorsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found." });
+    }
+
+    const patients = await patientsCollection
+      .find({ doctorId: doctor._id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({
+      doctor,
+      patients,
+    });
+  } catch (error) {
+    sendServerError(res, error);
+  }
+});
+
+// UPDATE doctor
+// PATCH /api/doctors/:id
+app.patch("/api/doctors/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid doctor ID." });
+    }
+
+    const doctorId = new ObjectId(id);
+
+    const allowedFields = [
+      "name",
+      "email",
+      "phone",
+      "specialization",
+      "qualification",
+      "experience",
+      "consultationFee",
+      "address",
+      "status",
+    ];
+
+    const updates = {};
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No valid fields to update." });
+    }
+
+    if (updates.email) {
+      updates.email = updates.email.trim().toLowerCase();
+
+      const existingDoctor = await doctorsCollection.findOne({
+        email: updates.email,
+        _id: { $ne: doctorId },
+      });
+
+      if (existingDoctor) {
+        return res.status(409).json({
+          message: "Another doctor already uses this email.",
+        });
+      }
+    }
+
+    if (updates.name) updates.name = updates.name.trim();
+    if (updates.phone) updates.phone = updates.phone.trim();
+
+    if (updates.experience !== undefined) {
+      updates.experience = Number(updates.experience) || 0;
+    }
+
+    if (updates.consultationFee !== undefined) {
+      updates.consultationFee = Number(updates.consultationFee) || 0;
+    }
+
+    updates.updatedAt = new Date();
+
+    const result = await doctorsCollection.findOneAndUpdate(
+      { _id: doctorId },
+      { $set: updates },
+      { returnDocument: "after" }
+    );
+
+    if (!result) {
+      return res.status(404).json({ message: "Doctor not found." });
+    }
+
+    // Keep the stored doctor name in patient records up to date.
+    if (updates.name) {
+      await patientsCollection.updateMany(
+        { doctorId },
+        { $set: { doctorName: updates.name } }
+      );
+    }
+
+    res.json({
+      message: "Doctor updated successfully.",
+      doctor: result,
+    });
+  });
+
+
+// DELETE doctor
+// DELETE /api/doctors/:id
+app.delete("/api/doctors/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid doctor ID." });
+    }
+
+    const doctorId = new ObjectId(id);
+
+    const result = await doctorsCollection.deleteOne({
+      _id: doctorId,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Doctor not found." });
+    }
+
+    // Keep patients, but remove their doctor assignment.
+    await patientsCollection.updateMany(
+      { doctorId },
+      {
+        $set: {
+          doctorId: null,
+          doctorName: null,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({ message: "Doctor deleted successfully." });
+  });
+
 
 app.get('/', (req, res) => {
   res.send('Database connection is successful!');
