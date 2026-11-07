@@ -778,6 +778,137 @@ app.delete("/api/patients/:id", async (req, res) => {
   });
 
 
+  // ========================================
+// DASHBOARD APIs
+// ========================================
+
+// GET dashboard statistics
+// GET /api/dashboard/stats
+app.get("/api/dashboard/stats", async (req, res) => {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [totalDoctors, totalPatients, newPatients, activePatients] =
+      await Promise.all([
+        doctorsCollection.countDocuments(),
+        patientsCollection.countDocuments(),
+        patientsCollection.countDocuments({
+          createdAt: { $gte: startOfMonth },
+        }),
+        patientsCollection.countDocuments({ status: "active" }),
+      ]);
+
+    res.json({
+      totalDoctors,
+      totalPatients,
+      newPatients,
+      activePatients,
+    });
+  });
+
+// GET monthly patient statistics (last 6 months)
+// GET /api/dashboard/monthly-patients
+app.get("/api/dashboard/monthly-patients", async (req, res) => {
+    const now = new Date();
+    const sixMonthsAgo = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)
+    );
+
+    const results = await patientsCollection
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: sixMonthsAgo },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: "$createdAt" },
+              month: { $month: "$createdAt" },
+            },
+            patients: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const monthlyData = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)
+      );
+
+      const year = date.getUTCFullYear();
+      const month = date.getUTCMonth() + 1;
+
+      const found = results.find(
+        (item) => item._id.year === year && item._id.month === month
+      );
+
+      monthlyData.push({
+        month: date.toLocaleString("en-US", {
+          month: "short",
+          timeZone: "UTC",
+        }),
+        patients: found ? found.patients : 0,
+      });
+    }
+
+    res.json(monthlyData);
+  });
+
+// GET patient count per doctor
+// GET /api/dashboard/patients-per-doctor
+app.get("/api/dashboard/patients-per-doctor", async (req, res) => {
+    const results = await doctorsCollection
+      .aggregate([
+        {
+          $lookup: {
+            from: "patients",
+            localField: "_id",
+            foreignField: "doctorId",
+            as: "patients",
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            doctorName: "$name",
+            totalPatients: { $size: "$patients" },
+          },
+        },
+        { $sort: { totalPatients: -1 } },
+        { $limit: 10 },
+      ])
+      .toArray();
+
+    res.json(results);
+  });
+
+// ========================================
+// ERROR HANDLING
+// ========================================
+
+// Unknown API route
+app.use((req, res) => {
+  res.status(404).json({
+    message: "API route not found.",
+  });
+});
+
+// General error handler
+app.use((error, req, res, next) => {
+  console.error("API Error:", error);
+
+  res.status(500).json({
+    message: "Internal server error.",
+  });
+});
+
+
 app.get('/', (req, res) => {
   res.send('Database connection is successful!');
 });
