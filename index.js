@@ -508,6 +508,276 @@ app.delete("/api/doctors/:id", async (req, res) => {
   });
 
 
+  // ========================================
+// PATIENT APIs
+// ========================================
+
+// GET all patients
+app.get("/api/patients",async (req, res) => {
+    const { page, limit, skip } = getPagination(req.query);
+    let filter = {};
+
+    if (req.query.search) {
+      const searchFilter = getSearchFilter(req.query.search, ["name", "email", "phone"]);
+      filter = { ...filter, ...searchFilter };
+    }
+
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    if (req.query.doctorId) {
+      if (!isValidId(req.query.doctorId)) {
+        return res.status(400).json({ message: "Invalid doctor ID." });
+      }
+      filter.doctorId = new ObjectId(req.query.doctorId);
+    }
+
+    const [items, total] = await Promise.all([
+      patientsCollection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray(),
+
+      patientsCollection.countDocuments(filter),
+    ]);
+
+    res.json({
+      items,
+      total,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+    });
+  });
+
+// CREATE patient
+// POST /api/patients
+app.post("/api/patients", async (req, res) => {
+    const {
+      name,
+      email,
+      phone,
+      age,
+      gender,
+      bloodGroup,
+      address,
+      doctorId,
+    } = req.body;
+
+    if (!name || !phone) {
+      return res.status(400).json({
+        message: "Patient name and phone are required.",
+      });
+    }
+
+    let assignedDoctorId = null;
+    let doctorName = null;
+
+    if (doctorId) {
+      if (!isValidId(doctorId)) {
+        return res.status(400).json({ message: "Invalid doctor ID." });
+      }
+
+      const doctor = await doctorsCollection.findOne({
+        _id: new ObjectId(doctorId),
+      });
+
+      if (!doctor) {
+        return res.status(404).json({ message: "Selected doctor not found." });
+      }
+
+      assignedDoctorId = doctor._id;
+      doctorName = doctor.name;
+    }
+
+    const newPatient = {
+      name: name.trim(),
+      email: email ? email.trim().toLowerCase() : "",
+      phone: phone.trim(),
+      age: Number(age) || null,
+      gender: gender || "",
+      bloodGroup: bloodGroup || "",
+      address: address || "",
+      doctorId: assignedDoctorId,
+      doctorName,
+      status: "active",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await patientsCollection.insertOne(newPatient);
+
+    res.status(201).json({
+      message: "Patient created successfully.",
+      patient: {
+        ...newPatient,
+        _id: result.insertedId,
+      },
+    });
+  });
+
+// GET patient details
+// GET /api/patients/:id
+app.get("/api/patients/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid patient ID." });
+    }
+
+    const patient = await patientsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!patient) {
+      return res.status(404).json({ message: "Patient not found." });
+    }
+
+    res.json({ patient });
+  });
+
+// UPDATE patient
+// PATCH /api/patients/:id
+app.patch("/api/patients/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid patient ID." });
+    }
+
+    const patientId = new ObjectId(id);
+
+    const allowedFields = [
+      "name",
+      "email",
+      "phone",
+      "age",
+      "gender",
+      "bloodGroup",
+      "address",
+      "status",
+    ];
+
+    const updates = {};
+
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No valid fields to update." });
+    }
+
+    if (updates.name) updates.name = updates.name.trim();
+    if (updates.phone) updates.phone = updates.phone.trim();
+    if (updates.email !== undefined) {
+      updates.email = updates.email.trim().toLowerCase();
+    }
+    if (updates.age !== undefined) {
+      updates.age = Number(updates.age) || null;
+    }
+
+    updates.updatedAt = new Date();
+
+    const result = await patientsCollection.findOneAndUpdate(
+      { _id: patientId },
+      { $set: updates },
+      { returnDocument: "after" }
+    );
+
+    if (!result) {
+      return res.status(404).json({ message: "Patient not found." });
+    }
+
+    res.json({
+      message: "Patient updated successfully.",
+      patient: result,
+    });
+  });
+
+// ASSIGN OR REMOVE doctor from a patient
+// PATCH /api/patients/:id/doctor
+// Body: { "doctorId": "doctor_mongodb_id" }
+// To remove: { "doctorId": null }
+app.patch("/api/patients/:id/doctor", async (req, res) => {
+    const { id } = req.params;
+    const { doctorId } = req.body;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid patient ID." });
+    }
+
+    const patientId = new ObjectId(id);
+
+    let assignedDoctorId = null;
+    let doctorName = null;
+
+    if (doctorId) {
+      if (!isValidId(doctorId)) {
+        return res.status(400).json({ message: "Invalid doctor ID." });
+      }
+
+      const doctor = await doctorsCollection.findOne({
+        _id: new ObjectId(doctorId),
+      });
+
+      if (!doctor) {
+        return res.status(404).json({ message: "Doctor not found." });
+      }
+
+      assignedDoctorId = doctor._id;
+      doctorName = doctor.name;
+    }
+
+    const result = await patientsCollection.findOneAndUpdate(
+      { _id: patientId },
+      {
+        $set: {
+          doctorId: assignedDoctorId,
+          doctorName,
+          updatedAt: new Date(),
+        },
+      },
+      { returnDocument: "after" }
+    );
+
+    if (!result) {
+      return res.status(404).json({ message: "Patient not found." });
+    }
+
+    res.json({
+      message: doctorId
+        ? "Doctor assigned successfully."
+        : "Doctor removed successfully.",
+      patient: result,
+    });
+  });
+
+// DELETE patient
+// DELETE /api/patients/:id
+app.delete("/api/patients/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid patient ID." });
+    }
+
+    const result = await patientsCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Patient not found." });
+    }
+
+    res.json({ message: "Patient deleted successfully." });
+  });
+
+
 app.get('/', (req, res) => {
   res.send('Database connection is successful!');
 });
