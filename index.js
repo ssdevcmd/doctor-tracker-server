@@ -29,7 +29,8 @@ const client = new MongoClient(uri, {
   }
 });
 
-const AUTH_URL = process.env.BETTER_AUTH_URL;
+
+const AUTH_URL = process.env.BETTER_AUTH_URL?.replace(/\/$/, "");
 
 const JWKS = createRemoteJWKSet(
   new URL(`${AUTH_URL}/api/auth/jwks`)
@@ -40,22 +41,17 @@ const verifyToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
-    // Check Authorization header
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         message: "Unauthorized. Token is required.",
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.slice(7);
 
-    // Verify JWT
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: AUTH_URL,
-      audience: AUTH_URL,
-    });
+    // Verify JWT signature
+    const { payload } = await jwtVerify(token, JWKS);
 
-    // Store user information
     req.user = payload;
 
     next();
@@ -68,8 +64,16 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Protect all API routes
-app.use("/api", verifyToken);
+// Protect application API routes
+app.use("/api", (req, res, next) => {
+  // Do not protect Better Auth JWKS endpoint
+  if (req.path === "/auth/jwks") {
+    return next();
+  }
+
+  verifyToken(req, res, next);
+});
+
 
 // Helper Functions
 const getPagination = (query) => {
@@ -99,7 +103,7 @@ let patientsCollection;
 
 const run = async () => {
   try {
-    await client.connect();
+//     await client.connect();
     const db = client.db('doctor_tracker_db');
     doctorsCollection = db.collection('doctors');
     patientsCollection = db.collection('patients');
@@ -107,9 +111,11 @@ const run = async () => {
     console.log("Successfully connected to MongoDB!");
   } catch (error) {
     console.error("MongoDB connection failed:", error);
+  }finally {
+    // await client.close();
   }
 };
-run();
+run().catch(console.dir);
 
 // DOCTOR APIs
 
@@ -771,3 +777,5 @@ app.use((error, req, res, next) => {
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
+
+module.exports = app;
