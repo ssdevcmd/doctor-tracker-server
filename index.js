@@ -38,6 +38,12 @@ const JWKS = createRemoteJWKSet(
 
 // Verify JWT middleware
 const verifyToken = async (req, res, next) => {
+  console.log("REQUEST:", req.method, req.originalUrl);
+  console.log(
+    "AUTH HEADER PRESENT:",
+    Boolean(req.headers.authorization)
+  );
+
   try {
     const authHeader = req.headers.authorization;
 
@@ -49,11 +55,11 @@ const verifyToken = async (req, res, next) => {
 
     const token = authHeader.slice(7);
 
-    // Verify JWT signature
     const { payload } = await jwtVerify(token, JWKS);
 
-    req.user = payload;
+    console.log("JWT VERIFIED:", true);
 
+    req.user = payload;
     next();
   } catch (error) {
     console.error("JWT verification error:", error.message);
