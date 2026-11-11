@@ -424,7 +424,9 @@ app.get("/api/patients",async (req, res) => {
 
 // CREATE patient
 // POST /api/patients
+
 app.post("/api/patients", async (req, res) => {
+  try {
     const {
       name,
       email,
@@ -436,7 +438,7 @@ app.post("/api/patients", async (req, res) => {
       doctorId,
     } = req.body;
 
-    if (!name || !phone) {
+    if (!name?.trim() || !phone?.trim()) {
       return res.status(400).json({
         message: "Patient name and phone are required.",
       });
@@ -447,7 +449,9 @@ app.post("/api/patients", async (req, res) => {
 
     if (doctorId) {
       if (!isValidId(doctorId)) {
-        return res.status(400).json({ message: "Invalid doctor ID." });
+        return res.status(400).json({
+          message: "Invalid doctor ID.",
+        });
       }
 
       const doctor = await doctorsCollection.findOne({
@@ -455,7 +459,9 @@ app.post("/api/patients", async (req, res) => {
       });
 
       if (!doctor) {
-        return res.status(404).json({ message: "Selected doctor not found." });
+        return res.status(404).json({
+          message: "Selected doctor not found.",
+        });
       }
 
       assignedDoctorId = doctor._id;
@@ -486,7 +492,14 @@ app.post("/api/patients", async (req, res) => {
         _id: result.insertedId,
       },
     });
-  });
+  } catch (error) {
+    console.error("Create patient error:", error);
+
+    res.status(500).json({
+      message: "Failed to create patient.",
+    });
+  }
+});
 
 // GET patient details
 // GET /api/patients/:id
@@ -732,7 +745,9 @@ app.get("/api/dashboard/monthly-patients", async (req, res) => {
 
 // GET patient count per doctor
 // GET /api/dashboard/patients-per-doctor
+
 app.get("/api/dashboard/patients-per-doctor", async (req, res) => {
+  try {
     const results = await doctorsCollection
       .aggregate([
         {
@@ -756,7 +771,15 @@ app.get("/api/dashboard/patients-per-doctor", async (req, res) => {
       .toArray();
 
     res.json(results);
-  });
+  } catch (error) {
+    console.error("Patients per doctor error:", error);
+
+    res.status(500).json({
+      message: "Failed to fetch patients per doctor.",
+    });
+  }
+});
+
 
 // ========================================
 // ERROR HANDLING
