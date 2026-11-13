@@ -30,13 +30,15 @@ const client = new MongoClient(uri, {
 });
 
 
+
 const AUTH_URL = process.env.BETTER_AUTH_URL?.replace(/\/$/, "");
+
+console.log("Better Auth URL configured:", Boolean(AUTH_URL));
 
 const JWKS = createRemoteJWKSet(
   new URL(`${AUTH_URL}/api/auth/jwks`)
 );
 
-// Verify JWT middleware
 const verifyToken = async (req, res, next) => {
   console.log("REQUEST:", req.method, req.originalUrl);
   console.log(
@@ -54,7 +56,6 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.slice(7);
-
     const { payload } = await jwtVerify(token, JWKS);
 
     console.log("JWT VERIFIED:", true);
@@ -70,15 +71,14 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Protect application API routes
 app.use("/api", (req, res, next) => {
-  // Do not protect Better Auth JWKS endpoint
   if (req.path === "/auth/jwks") {
     return next();
   }
 
   verifyToken(req, res, next);
 });
+
 
 
 // Helper Functions
